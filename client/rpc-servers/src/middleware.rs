@@ -18,16 +18,16 @@
 
 //! Middleware for RPC requests.
 
-use jsonrpc_core::{
-	Middleware as RequestMiddleware, Metadata,
-	Request, Response, FutureResponse, FutureOutput
-};
+use std::{sync::atomic::{AtomicUsize, Ordering::SeqCst}, time::Instant};
+
+use jsonrpc_core::{Call, FutureOutput, FutureResponse, Id, Metadata, MethodCall, Middleware as RequestMiddleware, Output, Request, Response};
 use prometheus_endpoint::{
 	Registry, CounterVec, PrometheusError,
 	Opts, register, U64
 };
 
 use futures::{future::Either, Future};
+
 
 /// Metrics for RPC middleware
 #[derive(Debug, Clone)]
@@ -59,6 +59,7 @@ impl RpcMetrics {
 pub struct RpcMiddleware {
 	metrics: RpcMetrics,
 	transport_label: String,
+	counter: AtomicUsize,
 }
 
 impl RpcMiddleware {
@@ -70,6 +71,7 @@ impl RpcMiddleware {
 		RpcMiddleware {
 			metrics,
 			transport_label: String::from(transport_label),
+			counter: AtomicUsize::new(0),
 		}
 	}
 }
@@ -88,5 +90,70 @@ impl<M: Metadata> RequestMiddleware<M> for RpcMiddleware {
 		}
 
 		Either::B(next(request, meta))
+	}
+
+	fn on_call<F, X>(&self, mut call: Call, meta: M, next: F) -> Either<Self::CallFuture, X>
+	where
+		F: Fn(Call, M) -> X + Send + Sync,
+		X: Future<Item = Option<Output>, Error = ()> + Send + 'static,
+	{
+		let start = Instant::now();
+		let request_number = self.counter.fetch_add(1, SeqCst);
+		log::trace!(
+			target: "rpc-intercept",
+			"Processing request {}: {:?}",
+			request_number,
+			call,
+		);
+		let method_name = match call {
+			Call::MethodCall(ref mut method) => {
+				if method.id == Id::Null {
+					method.id = Id::Num(request_number as u64);
+				}
+				method.method.to_owned()
+			}
+			Call::Notification(ref notif) => notif.method.to_owned(),
+			Call::Invalid { ref mut id } => {
+				if id == &Id::Null {
+					let _ = core::mem::replace(id, Id::Num(request_number as u64));
+				}
+				"".to_owned()
+			}
+		};
+
+		Either::A(Box::new(next(call, meta).map(move |response_opt| {
+			if let Some(ref response) = response_opt {
+				let len = serde_json::to_string(response).unwrap().len();
+
+				match response {
+					Output::Success(success) => log::debug!(
+						target: "rpc-intercept",
+						"Response [id: {:?} - method: {} - {} bytes - Processing took {} ms]: success",
+						id_to_string(&success.id),
+						method_name,
+						len,
+						start.elapsed().as_millis()
+					),
+					Output::Failure(failure) => log::error!(
+						target: "rpc-intercept",
+						"Response [id: {:?} - method: {} - {} bytes - Processing took {} ms]: {}",
+						id_to_string(&failure.id),
+						method_name,
+						len,
+						start.elapsed().as_millis(),
+						failure.error
+					),
+				}
+			};
+			response_opt
+		})))
+	}
+}
+
+fn id_to_string(id: &Id) -> String {
+	match id {
+		Id::Num(id) => { id.to_string() },
+		Id::Str(id) => { id.to_owned() },
+		Id::Null => { "null".to_owned() }
 	}
 }

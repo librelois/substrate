@@ -19,11 +19,13 @@
 //! Middleware for RPC requests.
 
 use jsonrpc_core::{
-	FutureOutput, FutureResponse, Metadata, Middleware as RequestMiddleware, Request, Response,
+	Call, FutureOutput, FutureResponse, Metadata, Middleware as RequestMiddleware,
+	Output, Request, Response
 };
-use prometheus_endpoint::{register, CounterVec, Opts, PrometheusError, Registry, U64};
+use prometheus_endpoint::{Registry, CounterVec, PrometheusError,Opts, register, U64};
 
 use futures::{future::Either, Future};
+
 
 /// Metrics for RPC middleware
 #[derive(Debug, Clone)]
@@ -51,22 +53,41 @@ impl RpcMetrics {
 }
 
 /// Middleware for RPC calls
-pub struct RpcMiddleware {
+pub struct RpcMiddleware<M: Metadata, CM: Default + RequestMiddleware<M> = NoopCustomMiddleware> {
 	metrics: RpcMetrics,
 	transport_label: String,
+	custom_middleware: CM,
+	phantom: core::marker::PhantomData<M>,
 }
 
-impl RpcMiddleware {
+impl<M: Metadata, CM: Default + RequestMiddleware<M>> RpcMiddleware<M, CM> {
 	/// Create an instance of middleware.
 	///
 	/// - `metrics`: Will be used to report statistics.
 	/// - `transport_label`: The label that is used when reporting the statistics.
 	pub fn new(metrics: RpcMetrics, transport_label: &str) -> Self {
-		RpcMiddleware { metrics, transport_label: String::from(transport_label) }
+		RpcMiddleware {
+			metrics,
+			transport_label: String::from(transport_label),
+			custom_middleware: Default::default(),
+			phantom: core::marker::PhantomData,
+		}
+	}
+	/// Create an instance of middleware with a sub-middleware
+	///
+	/// - `metrics`: Will be used to report statistics.
+	/// - `transport_label`: The label that is used when reporting the statistics.
+	pub fn new_with_custom_middleware(metrics: RpcMetrics, transport_label: &str, custom_middleware: CM) -> Self {
+		RpcMiddleware {
+			metrics,
+			transport_label: String::from(transport_label),
+			custom_middleware,
+			phantom: core::marker::PhantomData,
+		}
 	}
 }
 
-impl<M: Metadata> RequestMiddleware<M> for RpcMiddleware {
+impl<M: Metadata + Sync, CM: Default + RequestMiddleware<M, Future=FutureResponse, CallFuture=FutureOutput>> RequestMiddleware<M> for RpcMiddleware<M, CM> {
 	type Future = FutureResponse;
 	type CallFuture = FutureOutput;
 
@@ -79,6 +100,23 @@ impl<M: Metadata> RequestMiddleware<M> for RpcMiddleware {
 			rpc_calls.with_label_values(&[self.transport_label.as_str()]).inc();
 		}
 
-		Either::B(next(request, meta))
+		self.custom_middleware.on_request(request, meta, next)
 	}
+
+	fn on_call<F, X>(&self, call: Call, meta: M, next: F) -> Either<Self::CallFuture, X>
+	where
+		F: Fn(Call, M) -> X + Send + Sync,
+		X: Future<Item = Option<Output>, Error = ()> + Send + 'static,
+	{
+		self.custom_middleware.on_call(call, meta, next)
+	}
+}
+
+#[derive(Clone, Copy, Default)]
+/// The default custom middleware, do nothing
+pub struct NoopCustomMiddleware;
+
+impl<M: Metadata> RequestMiddleware<M> for NoopCustomMiddleware {
+	type Future = FutureResponse;
+	type CallFuture = FutureOutput;
 }

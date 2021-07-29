@@ -39,15 +39,15 @@ const WS_MAX_CONNECTIONS: usize = 100;
 const HTTP_THREADS: usize = 4;
 
 /// The RPC IoHandler containing all requested APIs.
-pub type RpcHandler<T> = pubsub::PubSubHandler<T, RpcMiddleware>;
+pub type RpcHandler<T> = pubsub::PubSubHandler<T, RpcMiddleware<T>>;
 
 pub use self::inner::*;
-pub use middleware::{RpcMetrics, RpcMiddleware};
+pub use middleware::{NoopCustomMiddleware, RpcMetrics, RpcMiddleware};
 
 /// Construct rpc `IoHandler`
-pub fn rpc_handler<M: PubSubMetadata>(
+pub fn rpc_handler<M: PubSubMetadata + Sync>(
 	extension: impl IoHandlerExtension<M>,
-	rpc_middleware: RpcMiddleware,
+	rpc_middleware: RpcMiddleware<M>,
 ) -> RpcHandler<M> {
 	let io_handler = MetaIoHandler::with_middleware(rpc_middleware);
 	let mut io = pubsub::PubSubHandler::new(io_handler);
@@ -84,7 +84,7 @@ mod inner {
 	/// Start HTTP server listening on given address.
 	///
 	/// **Note**: Only available if `not(target_os = "unknown")`.
-	pub fn start_http<M: pubsub::PubSubMetadata + Default>(
+	pub fn start_http<M: pubsub::PubSubMetadata + Default + Sync>(
 		addr: &std::net::SocketAddr,
 		thread_pool_size: Option<usize>,
 		cors: Option<&Vec<String>>,
@@ -107,7 +107,7 @@ mod inner {
 	/// Start IPC server listening on given path.
 	///
 	/// **Note**: Only available if `not(target_os = "unknown")`.
-	pub fn start_ipc<M: pubsub::PubSubMetadata + Default>(
+	pub fn start_ipc<M: pubsub::PubSubMetadata + Default + Sync>(
 		addr: &str,
 		io: RpcHandler<M>,
 	) -> io::Result<ipc::Server> {
@@ -125,7 +125,7 @@ mod inner {
 	///
 	/// **Note**: Only available if `not(target_os = "unknown")`.
 	pub fn start_ws<
-		M: pubsub::PubSubMetadata + From<jsonrpc_core::futures::sync::mpsc::Sender<String>>,
+		M: pubsub::PubSubMetadata + From<jsonrpc_core::futures::sync::mpsc::Sender<String>> + Sync,
 	>(
 		addr: &std::net::SocketAddr,
 		max_connections: Option<usize>,

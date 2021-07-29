@@ -38,6 +38,7 @@ use std::{collections::HashMap, io, net::SocketAddr, pin::Pin, task::Poll};
 
 use codec::{Decode, Encode};
 use futures::{compat::*, stream, Future, FutureExt, Stream, StreamExt};
+use jsonrpc_core::{FutureOutput, FutureResponse, Middleware};
 use log::{debug, error, warn};
 use parity_util_mem::MallocSizeOf;
 use sc_network::PeerId;
@@ -79,6 +80,8 @@ pub use sp_consensus::import_queue::ImportQueue;
 pub use std::{ops::Deref, result::Result, sync::Arc};
 pub use task_manager::{SpawnTaskHandle, TaskManager};
 
+type RpcMiddleware<CM> = sc_rpc_server::RpcMiddleware<sc_rpc::Metadata, CM>;
+
 const DEFAULT_PROTOCOL_ID: &str = "sup";
 
 /// A type that implements `MallocSizeOf` on native but not wasm.
@@ -93,11 +96,11 @@ impl<T> MallocSizeOfWasm for T {}
 
 /// RPC handlers that can perform RPC queries.
 #[derive(Clone)]
-pub struct RpcHandlers(
-	Arc<jsonrpc_core::MetaIoHandler<sc_rpc::Metadata, sc_rpc_server::RpcMiddleware>>,
+pub struct RpcHandlers<CM: Default + Middleware<RpcMetadata, Future=FutureResponse, CallFuture = FutureOutput>>(
+	Arc<jsonrpc_core::MetaIoHandler<RpcMetadata, RpcMiddleware<CM>>>,
 );
 
-impl RpcHandlers {
+impl<CM: Default + Middleware<RpcMetadata, Future=FutureResponse, CallFuture = FutureOutput>> RpcHandlers<CM> {
 	/// Starts an RPC query.
 	///
 	/// The query is passed as a string and must be a JSON text similar to what an HTTP client
@@ -122,7 +125,7 @@ impl RpcHandlers {
 	/// Provides access to the underlying `MetaIoHandler`
 	pub fn io_handler(
 		&self,
-	) -> Arc<jsonrpc_core::MetaIoHandler<sc_rpc::Metadata, sc_rpc_server::RpcMiddleware>> {
+	) -> Arc<jsonrpc_core::MetaIoHandler<RpcMetadata, RpcMiddleware<CM>>> {
 		self.0.clone()
 	}
 }
@@ -345,9 +348,10 @@ mod waiting {
 /// Starts RPC servers that run in their own thread, and returns an opaque object that keeps them alive.
 #[cfg(not(target_os = "unknown"))]
 fn start_rpc_servers<
+	CM: Default + Middleware<RpcMetadata>,
 	H: FnMut(
 		sc_rpc::DenyUnsafe,
-		sc_rpc_server::RpcMiddleware,
+		RpcMiddleware<CM>,
 	) -> sc_rpc_server::RpcHandler<sc_rpc::Metadata>,
 >(
 	config: &Configuration,
@@ -389,7 +393,7 @@ fn start_rpc_servers<
 				&*path,
 				gen_handler(
 					sc_rpc::DenyUnsafe::No,
-					sc_rpc_server::RpcMiddleware::new(rpc_metrics.clone(), "ipc"),
+					RpcMiddleware::new(rpc_metrics.clone(), "ipc"),
 				),
 			)
 		}),
@@ -400,7 +404,7 @@ fn start_rpc_servers<
 				config.rpc_cors.as_ref(),
 				gen_handler(
 					deny_unsafe(&address, &config.rpc_methods),
-					sc_rpc_server::RpcMiddleware::new(rpc_metrics.clone(), "http"),
+					RpcMiddleware::new(rpc_metrics.clone(), "http"),
 				),
 				config.rpc_max_payload,
 			)
@@ -413,7 +417,7 @@ fn start_rpc_servers<
 				config.rpc_cors.as_ref(),
 				gen_handler(
 					deny_unsafe(&address, &config.rpc_methods),
-					sc_rpc_server::RpcMiddleware::new(rpc_metrics.clone(), "ws"),
+					RpcMiddleware::new(rpc_metrics.clone(), "ws"),
 				),
 				config.rpc_max_payload,
 			)
@@ -425,9 +429,10 @@ fn start_rpc_servers<
 /// Starts RPC servers that run in their own thread, and returns an opaque object that keeps them alive.
 #[cfg(target_os = "unknown")]
 fn start_rpc_servers<
+	CM: Default + Middleware<RpcMetadata>,
 	H: FnMut(
 		sc_rpc::DenyUnsafe,
-		sc_rpc_server::RpcMiddleware,
+		RpcMiddleware<CM>,
 	) -> sc_rpc_server::RpcHandler<sc_rpc::Metadata>,
 >(
 	_: &Configuration,

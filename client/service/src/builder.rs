@@ -22,10 +22,11 @@ use crate::{
 	config::{Configuration, KeystoreConfig, PrometheusConfig, TransactionStorageMode},
 	error::Error,
 	metrics::MetricsService,
-	start_rpc_servers, MallocSizeOfWasm, RpcHandlers, SpawnTaskHandle, TaskManager,
-	TransactionPoolAdapter,
+	start_rpc_servers, MallocSizeOfWasm, RpcHandlers, RpcMiddleware, SpawnTaskHandle,
+	TaskManager, TransactionPoolAdapter,
 };
 use futures::{channel::oneshot, future::ready, FutureExt, StreamExt};
+use jsonrpc_core::{FutureOutput, FutureResponse, Middleware};
 use jsonrpc_pubsub::manager::SubscriptionManager;
 use log::info;
 use prometheus_endpoint::Registry;
@@ -535,9 +536,9 @@ where
 }
 
 /// Spawn the tasks that are required to run a node.
-pub fn spawn_tasks<TBl, TBackend, TExPool, TRpc, TCl>(
+pub fn spawn_tasks<TBl, TBackend, TExPool, TRpc, TCl, TCm>(
 	params: SpawnTasksParams<TBl, TCl, TExPool, TRpc, TBackend>,
-) -> Result<RpcHandlers, Error>
+) -> Result<RpcHandlers<TCm>, Error>
 where
 	TCl: ProvideRuntimeApi<TBl>
 		+ HeaderMetadata<TBl, Error = sp_blockchain::Error>
@@ -564,6 +565,7 @@ where
 		+ MallocSizeOfWasm
 		+ 'static,
 	TRpc: sc_rpc::RpcExtension<sc_rpc::Metadata>,
+	TCm: Default + Middleware<sc_rpc::Metadata, Future = FutureResponse, CallFuture = FutureOutput>,
 {
 	let SpawnTasksParams {
 		mut config,
@@ -631,7 +633,7 @@ where
 
 	// RPC
 	let gen_handler = |deny_unsafe: sc_rpc::DenyUnsafe,
-	                   rpc_middleware: sc_rpc_server::RpcMiddleware| {
+	                   rpc_middleware: RpcMiddleware<TCm>| {
 		gen_handler(
 			deny_unsafe,
 			rpc_middleware,
@@ -728,9 +730,9 @@ fn init_telemetry<TBl: BlockT, TCl: BlockBackend<TBl>>(
 	Ok(telemetry.handle())
 }
 
-fn gen_handler<TBl, TBackend, TExPool, TRpc, TCl>(
+fn gen_handler<TBl, TBackend, TExPool, TRpc, TCl, TCm>(
 	deny_unsafe: sc_rpc::DenyUnsafe,
-	rpc_middleware: sc_rpc_server::RpcMiddleware,
+	rpc_middleware: RpcMiddleware<TCm>,
 	config: &Configuration,
 	spawn_handle: SpawnTaskHandle,
 	client: Arc<TCl>,
@@ -760,6 +762,7 @@ where
 	TBackend: sc_client_api::backend::Backend<TBl> + 'static,
 	TRpc: sc_rpc::RpcExtension<sc_rpc::Metadata>,
 	<TCl as ProvideRuntimeApi<TBl>>::Api: sp_session::SessionKeys<TBl> + sp_api::Metadata<TBl>,
+	TCm: Default + jsonrpc_core::Middleware<sc_rpc::Metadata>,
 {
 	use sc_rpc::{author, chain, offchain, state, system};
 

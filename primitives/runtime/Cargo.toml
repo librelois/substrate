@@ -28,6 +28,10 @@ paste = "1.0"
 rand = { version = "0.7.2", optional = true }
 impl-trait-for-tuples = "0.2.1"
 parity-util-mem = { version = "0.10.2", default-features = false, features = ["primitive-types"] }
+primitive-types = { version = "0.10.1", default-features = false, features = [
+	"codec",
+	"scale-info"
+] }
 hash256-std-hasher = { version = "0.15.2", default-features = false }
 either = { version = "1.5", default-features = false }
 
@@ -56,6 +60,7 @@ std = [
 	"sp-io/std",
 	"serde",
 	"parity-util-mem/std",
+	"primitive-types/std",
 	"hash256-std-hasher/std",
 	"either/use_std",
 ]

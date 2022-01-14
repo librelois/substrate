@@ -604,7 +604,8 @@ impl<'de> serde::Deserialize<'de> for AccountId32 {
 	where
 		D: serde::Deserializer<'de>,
 	{
-		Ss58Codec::from_ss58check(&String::deserialize(deserializer)?)
+		use sp_std::str::FromStr as _;
+		AccountId32::from_str(&String::deserialize(deserializer)?)
 			.map_err(|e| serde::de::Error::custom(format!("{:?}", e)))
 	}
 }

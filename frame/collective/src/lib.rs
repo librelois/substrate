@@ -78,11 +78,23 @@ pub type ProposalIndex = u32;
 /// vote exactly once, therefore also the number of votes for any given motion.
 pub type MemberCount = u32;
 
-pub trait MembersStorage<MemberId>: IsMember<MemberId> {
+pub trait MembersStorage<MemberId>: sp_runtime::traits::IsMember<MemberId> {
 	fn members_count() -> MemberCount;
 }
 
-pub struct InternalMembersStorage<>
+pub struct InternalMembersStorage<T: Config<I>, I: 'static = ()>(PhantomData<(T, I)>);
+impl<T: Config<I>, I: 'static> sp_runtime::traits::IsMember<T::AccountId>
+	for InternalMembersStorage<T, I>
+{
+	fn is_member(account_id: &T::AccountId) -> bool {
+		Pallet::<T, I>::is_member(account_id)
+	}
+}
+impl<T: Config<I>, I: 'static> MembersStorage<T::AccountId> for InternalMembersStorage<T, I> {
+	fn members_count() -> MemberCount {
+		Members::<T, I>::get().len() as u32
+	}
+}
 
 /// Default voting strategy when a member is inactive.
 pub trait DefaultVote {
@@ -171,6 +183,7 @@ pub mod pallet {
 	use super::*;
 	use frame_support::pallet_prelude::*;
 	use frame_system::pallet_prelude::*;
+	use sp_runtime::traits::IsMember;
 
 	/// The current storage version.
 	const STORAGE_VERSION: StorageVersion = StorageVersion::new(4);
@@ -200,6 +213,8 @@ pub mod pallet {
 
 		/// Maximum number of proposals allowed to be active in parallel.
 		type MaxProposals: Get<ProposalIndex>;
+
+		type MembersStorage: MembersStorage<Self::AccountId>;
 
 		/// The maximum number of members supported by the pallet. Used for weight estimation.
 		///
@@ -446,8 +461,7 @@ pub mod pallet {
 			#[pallet::compact] length_bound: u32,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			let members = Self::members();
-			ensure!(members.contains(&who), Error::<T, I>::NotMember);
+			ensure!(T::MembersStorage::is_member(&who), Error::<T, I>::NotMember);
 			let proposal_len = proposal.using_encoded(|x| x.len());
 			ensure!(proposal_len <= length_bound as usize, Error::<T, I>::WrongProposalLength);
 
@@ -461,8 +475,8 @@ pub mod pallet {
 			Ok(get_result_weight(result)
 				.map(|w| {
 					T::WeightInfo::execute(
-						proposal_len as u32,  // B
-						members.len() as u32, // M
+						proposal_len as u32,                       // B
+						T::MembersStorage::members_count() as u32, // M
 					)
 					.saturating_add(w) // P
 				})
@@ -518,8 +532,7 @@ pub mod pallet {
 			#[pallet::compact] length_bound: u32,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			let members = Self::members();
-			ensure!(members.contains(&who), Error::<T, I>::NotMember);
+			ensure!(T::MembersStorage::is_member(&who), Error::<T, I>::NotMember);
 
 			let proposal_len = proposal.using_encoded(|x| x.len());
 			ensure!(proposal_len <= length_bound as usize, Error::<T, I>::WrongProposalLength);
@@ -540,8 +553,8 @@ pub mod pallet {
 				Ok(get_result_weight(result)
 					.map(|w| {
 						T::WeightInfo::propose_execute(
-							proposal_len as u32,  // B
-							members.len() as u32, // M
+							proposal_len as u32,                       // B
+							T::MembersStorage::members_count() as u32, // M
 						)
 						.saturating_add(w) // P1
 					})
@@ -571,9 +584,9 @@ pub mod pallet {
 				});
 
 				Ok(Some(T::WeightInfo::propose_proposed(
-					proposal_len as u32,     // B
-					members.len() as u32,    // M
-					active_proposals as u32, // P2
+					proposal_len as u32,                       // B
+					T::MembersStorage::members_count() as u32, // M
+					active_proposals as u32,                   // P2
 				))
 				.into())
 			}
@@ -602,8 +615,7 @@ pub mod pallet {
 			approve: bool,
 		) -> DispatchResultWithPostInfo {
 			let who = ensure_signed(origin)?;
-			let members = Self::members();
-			ensure!(members.contains(&who), Error::<T, I>::NotMember);
+			ensure!(T::MembersStorage::is_member(&who), Error::<T, I>::NotMember);
 
 			let mut voting = Self::voting(&proposal).ok_or(Error::<T, I>::ProposalMissing)?;
 			ensure!(voting.index == index, Error::<T, I>::WrongIndex);
@@ -647,9 +659,14 @@ pub mod pallet {
 			Voting::<T, I>::insert(&proposal, voting);
 
 			if is_account_voting_first_time {
-				Ok((Some(T::WeightInfo::vote(members.len() as u32)), Pays::No).into())
+				Ok((Some(T::WeightInfo::vote(T::MembersStorage::members_count() as u32)), Pays::No)
+					.into())
 			} else {
-				Ok((Some(T::WeightInfo::vote(members.len() as u32)), Pays::Yes).into())
+				Ok((
+					Some(T::WeightInfo::vote(T::MembersStorage::members_count() as u32)),
+					Pays::Yes,
+				)
+					.into())
 			}
 		}
 

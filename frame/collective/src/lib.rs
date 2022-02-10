@@ -78,6 +78,12 @@ pub type ProposalIndex = u32;
 /// vote exactly once, therefore also the number of votes for any given motion.
 pub type MemberCount = u32;
 
+pub trait MembersStorage<MemberId>: IsMember<MemberId> {
+	fn members_count() -> MemberCount;
+}
+
+pub struct InternalMembersStorage<>
+
 /// Default voting strategy when a member is inactive.
 pub trait DefaultVote {
 	/// Get the default voting strategy, given:

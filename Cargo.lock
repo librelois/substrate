@@ -2386,6 +2386,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashbrown"
+version = "0.12.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
+dependencies = [
+ "ahash 0.7.4",
+]
+
+[[package]]
 name = "heck"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3823,6 +3832,16 @@ dependencies = [
  "hash-db",
  "hashbrown 0.11.2",
  "parity-util-mem",
+]
+
+[[package]]
+name = "memory-db"
+version = "0.31.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e0c7cba9ce19ac7ffd2053ac9f49843bbd3f4318feedfd74e85c19d5fb0ba66"
+dependencies = [
+ "hash-db",
+ "hashbrown 0.12.3",
 ]
 
 [[package]]
@@ -9401,7 +9420,7 @@ dependencies = [
  "criterion",
  "hash-db",
  "hex-literal",
- "memory-db",
+ "memory-db 0.31.0",
  "parity-scale-codec",
  "sp-core",
  "sp-runtime",
@@ -9717,7 +9736,7 @@ dependencies = [
  "frame-system-rpc-runtime-api",
  "futures 0.3.15",
  "log",
- "memory-db",
+ "memory-db 0.31.0",
  "pallet-babe",
  "pallet-timestamp",
  "parity-scale-codec",
@@ -10505,7 +10524,7 @@ dependencies = [
  "criterion",
  "hash-db",
  "keccak-hasher",
- "memory-db",
+ "memory-db 0.27.0",
  "parity-scale-codec",
  "trie-db",
  "trie-root",
